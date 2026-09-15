@@ -50,7 +50,7 @@ http://localhost:9001/
 
 The home page lists the serial ports detected on the current PC. On Windows they look like `COM3`; on Linux they look like `/dev/ttyUSB3` or `/dev/ttyACM0`.
 
-Select a port and baudrate, then click `Connect`. After connecting, the port, baudrate, refresh button, and profile selector are locked until `Disconnect`.
+Select a port and baudrate, then click `Connect`. After connecting, the port, baudrate, and refresh button are locked until `Disconnect`.
 
 To bind another host or port without a config file:
 
@@ -143,7 +143,7 @@ Content-Type: application/json
 List quick commands:
 
 ```http
-GET /api/commands?profile=O-RU
+GET /api/commands
 ```
 
 ## WebSocket
@@ -151,7 +151,7 @@ GET /api/commands?profile=O-RU
 Connect the browser directly to the PC agent:
 
 ```javascript
-const ws = new WebSocket("ws://192.168.1.101:9001/ws/console?port=COM3&baudrate=115200&profile=O-RU");
+const ws = new WebSocket("ws://192.168.1.101:9001/ws/console?port=COM3&baudrate=115200");
 
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);

@@ -130,7 +130,7 @@ INDEX_HTML = """<!doctype html>
     }
     .quick {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
       margin-top: 8px;
     }
@@ -189,11 +189,6 @@ INDEX_HTML = """<!doctype html>
         <label for="baudrate">Baudrate</label>
         <select id="baudrate"></select>
 
-        <label for="profile">Command profile</label>
-        <select id="profile">
-          <option value="default">default</option>
-        </select>
-
         <div class="actions">
           <button id="connect" class="primary" type="button">Connect</button>
           <button id="disconnect" class="danger" type="button" disabled>Disconnect</button>
@@ -219,7 +214,6 @@ INDEX_HTML = """<!doctype html>
     const $ = (id) => document.getElementById(id);
     const portSelect = $("port");
     const baudrateSelect = $("baudrate");
-    const profileSelect = $("profile");
     const terminal = $("terminal");
     const statusEl = $("status");
     const commandInput = $("command");
@@ -238,7 +232,6 @@ INDEX_HTML = """<!doctype html>
       state.connected = locked;
       portSelect.disabled = locked;
       baudrateSelect.disabled = locked;
-      profileSelect.disabled = locked;
       $("refreshPorts").disabled = locked;
       $("connect").disabled = locked;
       $("disconnect").disabled = !locked;
@@ -280,8 +273,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadCommands() {
-      const profile = profileSelect.value || "default";
-      const response = await fetch(`/api/commands?profile=${encodeURIComponent(profile)}`);
+      const response = await fetch("/api/commands");
       const data = await response.json();
       state.commands = data.commands || {};
       const quick = $("quick");
@@ -303,7 +295,6 @@ INDEX_HTML = """<!doctype html>
       const params = new URLSearchParams({
         port: portSelect.value,
         baudrate: baudrateSelect.value,
-        profile: profileSelect.value || "default",
       });
       return `${scheme}://${location.host}/ws/console?${params}`;
     }
@@ -369,7 +360,6 @@ INDEX_HTML = """<!doctype html>
     commandInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") sendCommand();
     });
-    profileSelect.addEventListener("change", loadCommands);
 
     Promise.all([loadStatus(), loadPorts(), loadCommands()]).catch((error) => {
       setStatus(error.message, "error");
