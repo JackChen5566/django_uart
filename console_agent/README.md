@@ -15,7 +15,6 @@ cd C:\path\to\django_uart
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r .\console_agent\requirements.txt
-Copy-Item .\console_agent\config.example.json .\console_agent\config.json
 ```
 
 Linux:
@@ -25,12 +24,59 @@ cd /path/to/django_uart
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r ./console_agent/requirements.txt
+```
+
+## Run With The Built-In UI
+
+Config is optional. The simplest run command is:
+
+Windows:
+
+```powershell
+python.exe -m console_agent.agent
+```
+
+Linux:
+
+```bash
+python3 -m console_agent.agent
+```
+
+Then open:
+
+```text
+http://localhost:9001/
+```
+
+The home page lists the serial ports detected on the current PC. On Windows they look like `COM3`; on Linux they look like `/dev/ttyUSB3` or `/dev/ttyACM0`.
+
+Select a port and baudrate, then click `Connect`. After connecting, the port, baudrate, refresh button, and profile selector are locked until `Disconnect`.
+
+To bind another host or port without a config file:
+
+```powershell
+python.exe -m console_agent.agent --host 0.0.0.0 --port 9001
+```
+
+## Optional Config
+
+You only need a config file if you want fixed PC names, TLS, custom quick commands, or predefined device metadata.
+
+Copy the example first:
+
+Windows:
+
+```powershell
+Copy-Item .\console_agent\config.example.json .\console_agent\config.json
+```
+
+Linux:
+
+```bash
 cp ./console_agent/config.example.json ./console_agent/config.json
 ```
 
-## Configure
-
-Edit `console_agent/config.json`.
+Then edit `console_agent/config.json`.
 
 Windows ports look like:
 
@@ -52,7 +98,7 @@ sudo usermod -aG dialout "$USER"
 
 Log out and back in after changing group membership.
 
-## Run
+Run with config:
 
 Windows:
 
@@ -158,4 +204,3 @@ Django should return PC metadata only, for example:
 ```
 
 The browser then calls the selected PC agent directly. Serial logs and command traffic never pass through Django.
-

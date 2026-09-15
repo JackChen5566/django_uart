@@ -7,15 +7,377 @@ import logging
 import ssl
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from aiohttp import WSMsgType, web
 
 from .command_manager import CommandManager
-from .config import AgentConfig, load_config
+from .config import AgentConfig, load_config_or_default
 from .serial_manager import SerialManager, SerialSession, SerialSettings
 
 
 LOGGER = logging.getLogger("console-agent")
+
+
+INDEX_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Serial Console Agent</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1b1f29;
+      --panel-2: #151923;
+      --line: #343b4d;
+      --text: #eef2f8;
+      --muted: #9ba7ba;
+      --accent: #5cc8ff;
+      --danger: #ff6b6b;
+      --ok: #74d99f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 20px 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .status {
+      color: var(--muted);
+      min-width: 160px;
+      text-align: right;
+    }
+    .status.connected { color: var(--ok); }
+    .status.error { color: var(--danger); }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+    aside, section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    aside { padding: 16px; }
+    label {
+      display: block;
+      margin: 14px 0 6px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    select, input {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 10px;
+      font: inherit;
+    }
+    button {
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #252b38;
+      color: var(--text);
+      padding: 0 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: #2a84aa;
+      background: #116487;
+    }
+    button.danger {
+      border-color: #8c3434;
+      background: #6f2525;
+    }
+    button:disabled, select:disabled, input:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .quick {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .terminal-wrap {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-height: calc(100vh - 110px);
+    }
+    #terminal {
+      min-height: 420px;
+      max-height: calc(100vh - 210px);
+      overflow: auto;
+      margin: 0;
+      padding: 14px;
+      background: #07090d;
+      border-radius: 8px 8px 0 0;
+      color: #d8f7dd;
+      font: 13px/1.45 Consolas, "Cascadia Mono", "Courier New", monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .command-row {
+      display: grid;
+      grid-template-columns: 1fr 92px;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 10px;
+    }
+    @media (max-width: 820px) {
+      .layout { grid-template-columns: 1fr; }
+      .terminal-wrap { min-height: 560px; }
+      #terminal { max-height: 520px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .status { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Serial Console Agent</h1>
+      <div id="status" class="status">Loading...</div>
+    </header>
+    <div class="layout">
+      <aside>
+        <button id="refreshPorts" type="button">Refresh ports</button>
+
+        <label for="port">Serial port</label>
+        <select id="port"></select>
+
+        <label for="baudrate">Baudrate</label>
+        <select id="baudrate"></select>
+
+        <label for="profile">Command profile</label>
+        <select id="profile">
+          <option value="default">default</option>
+        </select>
+
+        <div class="actions">
+          <button id="connect" class="primary" type="button">Connect</button>
+          <button id="disconnect" class="danger" type="button" disabled>Disconnect</button>
+        </div>
+
+        <label>Quick command</label>
+        <div id="quick" class="quick"></div>
+        <div class="hint">After connecting, port settings are locked until Disconnect.</div>
+      </aside>
+
+      <section class="terminal-wrap">
+        <pre id="terminal"></pre>
+        <div class="command-row">
+          <input id="command" type="text" placeholder="Type command and press Enter" disabled>
+          <button id="send" type="button" disabled>Send</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const state = { ws: null, commands: {}, connected: false };
+    const $ = (id) => document.getElementById(id);
+    const portSelect = $("port");
+    const baudrateSelect = $("baudrate");
+    const profileSelect = $("profile");
+    const terminal = $("terminal");
+    const statusEl = $("status");
+    const commandInput = $("command");
+
+    function setStatus(text, cls = "") {
+      statusEl.textContent = text;
+      statusEl.className = `status ${cls}`.trim();
+    }
+
+    function append(text) {
+      terminal.textContent += text;
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function setLocked(locked) {
+      state.connected = locked;
+      portSelect.disabled = locked;
+      baudrateSelect.disabled = locked;
+      profileSelect.disabled = locked;
+      $("refreshPorts").disabled = locked;
+      $("connect").disabled = locked;
+      $("disconnect").disabled = !locked;
+      commandInput.disabled = !locked;
+      $("send").disabled = !locked;
+      for (const button of document.querySelectorAll("[data-command]")) {
+        button.disabled = !locked;
+      }
+    }
+
+    async function loadStatus() {
+      const response = await fetch("/api/status");
+      const data = await response.json();
+      baudrateSelect.innerHTML = "";
+      for (const rate of data.baudrates) {
+        const option = new Option(rate, rate);
+        if (rate === data.default_baudrate) option.selected = true;
+        baudrateSelect.add(option);
+      }
+      setStatus(`${data.name} online`);
+    }
+
+    async function loadPorts() {
+      const response = await fetch("/api/ports");
+      const ports = await response.json();
+      portSelect.innerHTML = "";
+
+      if (!ports.length) {
+        portSelect.add(new Option("No serial ports found", ""));
+        setStatus("No serial ports found", "error");
+        return;
+      }
+
+      for (const port of ports) {
+        const label = port.description ? `${port.device} - ${port.description}` : port.device;
+        portSelect.add(new Option(label, port.device));
+      }
+      setStatus(`${ports.length} port(s) found`);
+    }
+
+    async function loadCommands() {
+      const profile = profileSelect.value || "default";
+      const response = await fetch(`/api/commands?profile=${encodeURIComponent(profile)}`);
+      const data = await response.json();
+      state.commands = data.commands || {};
+      const quick = $("quick");
+      quick.innerHTML = "";
+
+      for (const name of Object.keys(state.commands)) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = name;
+        button.dataset.command = name;
+        button.disabled = !state.connected;
+        button.addEventListener("click", () => sendQuick(name));
+        quick.appendChild(button);
+      }
+    }
+
+    function wsUrl() {
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      const params = new URLSearchParams({
+        port: portSelect.value,
+        baudrate: baudrateSelect.value,
+        profile: profileSelect.value || "default",
+      });
+      return `${scheme}://${location.host}/ws/console?${params}`;
+    }
+
+    function connect() {
+      if (!portSelect.value) {
+        setStatus("Select a serial port first", "error");
+        return;
+      }
+
+      const ws = new WebSocket(wsUrl());
+      state.ws = ws;
+      setStatus("Connecting...");
+
+      ws.onopen = () => {
+        setLocked(true);
+        append(`\\n[connected ${portSelect.value} @ ${baudrateSelect.value}]\\n`);
+      };
+
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.type === "serial") append(message.data);
+        if (message.type === "connected") setStatus(`${message.port} connected`, "connected");
+        if (message.type === "error") {
+          append(`\\n[error] ${message.message}\\n`);
+          setStatus(message.message, "error");
+        }
+      };
+
+      ws.onclose = () => {
+        setLocked(false);
+        setStatus("Disconnected");
+        append("\\n[disconnected]\\n");
+        state.ws = null;
+      };
+
+      ws.onerror = () => {
+        setStatus("WebSocket error", "error");
+      };
+    }
+
+    function disconnect() {
+      if (state.ws) state.ws.close();
+    }
+
+    function sendCommand() {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      const value = commandInput.value;
+      if (!value) return;
+      state.ws.send(JSON.stringify({ type: "command", data: `${value}\\n` }));
+      commandInput.value = "";
+    }
+
+    function sendQuick(name) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      state.ws.send(JSON.stringify({ type: "quick_command", name }));
+    }
+
+    $("refreshPorts").addEventListener("click", loadPorts);
+    $("connect").addEventListener("click", connect);
+    $("disconnect").addEventListener("click", disconnect);
+    $("send").addEventListener("click", sendCommand);
+    commandInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") sendCommand();
+    });
+    profileSelect.addEventListener("change", loadCommands);
+
+    Promise.all([loadStatus(), loadPorts(), loadCommands()]).catch((error) => {
+      setStatus(error.message, "error");
+    });
+  </script>
+</body>
+</html>
+"""
 
 
 @web.middleware
@@ -42,12 +404,18 @@ def create_app(config: AgentConfig) -> web.Application:
     app = web.Application(middlewares=[cors_middleware])
     app["config"] = config
     app["commands"] = CommandManager(config.commands)
+    app["active_ports"] = set()
+    app.router.add_get("/", index)
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/ports", ports)
     app.router.add_post("/api/connect", connect)
     app.router.add_get("/api/commands", commands)
     app.router.add_get("/ws/console", console_ws)
     return app
+
+
+async def index(request: web.Request) -> web.Response:
+    return web.Response(text=INDEX_HTML, content_type="text/html")
 
 
 async def status(request: web.Request) -> web.Response:
@@ -58,6 +426,7 @@ async def status(request: web.Request) -> web.Response:
             "status": "online",
             "port": config.port,
             "tls": config.tls_enabled,
+            "default_baudrate": config.default_baudrate,
             "devices": [
                 {
                     "name": device.name,
@@ -87,7 +456,7 @@ async def connect(request: web.Request) -> web.Response:
 
     scheme = "wss" if request.app["config"].tls_enabled else "ws"
     host = request.host
-    query = f"port={settings.port}&baudrate={settings.baudrate}"
+    query = urlencode({"port": settings.port, "baudrate": settings.baudrate})
     return web.json_response({"ok": True, "websocket_url": f"{scheme}://{host}/ws/console?{query}"})
 
 
@@ -110,8 +479,15 @@ async def console_ws(request: web.Request) -> web.WebSocketResponse:
 
     profile = request.query.get("profile", "default")
     manager: CommandManager = request.app["commands"]
+    active_ports: set[str] = request.app["active_ports"]
+
+    if settings.port in active_ports:
+        await ws.send_json({"type": "error", "message": f"{settings.port} is already connected"})
+        await ws.close()
+        return ws
 
     try:
+        active_ports.add(settings.port)
         async with SerialSession(settings) as session:
             await ws.send_json(
                 {
@@ -134,6 +510,7 @@ async def console_ws(request: web.Request) -> web.WebSocketResponse:
         if not ws.closed:
             await ws.send_json({"type": "error", "message": str(exc)})
     finally:
+        active_ports.discard(settings.port)
         if not ws.closed:
             await ws.close()
 
@@ -222,16 +599,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local serial console agent.")
     parser.add_argument(
         "--config",
-        default=str(Path(__file__).with_name("config.json")),
-        help="Path to agent config JSON.",
+        default=None,
+        help="Optional path to agent config JSON.",
     )
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind when no config file is used.")
+    parser.add_argument("--port", default=9001, type=int, help="Port to bind when no config file is used.")
     return parser.parse_args()
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
-    config = load_config(args.config)
+    config = load_config_or_default(args.config, host=args.host, port=args.port)
     protocol = "wss" if config.tls_enabled else "ws"
     LOGGER.info("Starting %s on %s:%s (%s)", config.pc_name, config.host, config.port, protocol)
     web.run_app(create_app(config), host=config.host, port=config.port, ssl_context=ssl_context(config))
@@ -239,4 +618,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

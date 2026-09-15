@@ -9,6 +9,15 @@ from typing import Any
 
 
 DEFAULT_BAUDRATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+DEFAULT_COMMANDS = {
+    "default": {
+        "enter": "",
+        "version": "cat /etc/version",
+        "reboot": "reboot",
+        "status": "systemctl status ru",
+        "log": "tail -n 100 /var/log/ru.log",
+    }
+}
 
 
 @dataclass(frozen=True)
@@ -73,3 +82,39 @@ def load_config(path: str | os.PathLike[str]) -> AgentConfig:
         log_dir=str(data.get("log_dir", "logs")),
     )
 
+
+def default_config(host: str = "0.0.0.0", port: int = 9001) -> AgentConfig:
+    return AgentConfig(
+        pc_name=platform.node() or "console-agent",
+        host=host,
+        port=port,
+        commands=DEFAULT_COMMANDS,
+    )
+
+
+def load_config_or_default(
+    path: str | os.PathLike[str] | None,
+    host: str = "0.0.0.0",
+    port: int = 9001,
+) -> AgentConfig:
+    if not path:
+        return default_config(host=host, port=port)
+
+    config_path = Path(path)
+    if not config_path.exists():
+        return default_config(host=host, port=port)
+
+    loaded = load_config(config_path)
+    return AgentConfig(
+        pc_name=loaded.pc_name,
+        host=loaded.host,
+        port=loaded.port,
+        cors_origins=loaded.cors_origins,
+        default_baudrate=loaded.default_baudrate,
+        baudrates=loaded.baudrates,
+        devices=loaded.devices,
+        commands=loaded.commands or DEFAULT_COMMANDS,
+        certfile=loaded.certfile,
+        keyfile=loaded.keyfile,
+        log_dir=loaded.log_dir,
+    )
