@@ -1,0 +1,41 @@
+{
+  "pc_name": "SQA-PC-01",
+  "host": "0.0.0.0",
+  "port": 9001,
+  "cors_origins": ["*"],
+  "default_baudrate": 115200,
+  "baudrates": [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600],
+  "certfile": null,
+  "keyfile": null,
+  "log_dir": "logs",
+  "devices": [
+    {
+      "name": "RU-01",
+      "port": "/dev/ttyUSB3",
+      "baudrate": 115200,
+      "profile": "O-RU"
+    },
+    {
+      "name": "RU-Windows",
+      "port": "COM3",
+      "baudrate": 115200,
+      "profile": "O-RU"
+    }
+  ],
+  "commands": {
+    "default": {
+      "reboot": "reboot",
+      "version": "cat /etc/version",
+      "status": "systemctl status ru",
+      "log": "tail -n 100 /var/log/ru.log"
+    },
+    "O-RU": {
+      "reboot": "reboot",
+      "version": "cat /etc/version",
+      "ptp": "pmc -u -b 0 'GET CURRENT_DATA_SET'",
+      "sync": "timedatectl status",
+      "alarm": "cat /var/log/alarm.log"
+    }
+  }
+}
+
