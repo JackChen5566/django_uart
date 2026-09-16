@@ -83,7 +83,7 @@ def load_config(path: str | os.PathLike[str]) -> AgentConfig:
     )
 
 
-def default_config(host: str = "0.0.0.0", port: int = 9001) -> AgentConfig:
+def default_config(host: str = "127.0.0.1", port: int = 9001) -> AgentConfig:
     return AgentConfig(
         pc_name=platform.node() or "console-agent",
         host=host,
@@ -94,7 +94,7 @@ def default_config(host: str = "0.0.0.0", port: int = 9001) -> AgentConfig:
 
 def load_config_or_default(
     path: str | os.PathLike[str] | None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 9001,
 ) -> AgentConfig:
     if not path:

@@ -1,6 +1,6 @@
 {
   "pc_name": "SQA-PC-01",
-  "host": "0.0.0.0",
+  "host": "127.0.0.1",
   "port": 9001,
   "cors_origins": ["*"],
   "default_baudrate": 115200,
@@ -38,4 +38,3 @@
     }
   }
 }
-

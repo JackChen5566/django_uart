@@ -387,6 +387,8 @@ async def cors_middleware(request: web.Request, handler: web.RequestHandler) -> 
 
     response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    if request.headers.get("Access-Control-Request-Private-Network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
     return response
 
 
@@ -396,6 +398,7 @@ def create_app(config: AgentConfig) -> web.Application:
     app["commands"] = CommandManager(config.commands)
     app["active_ports"] = set()
     app.router.add_get("/", index)
+    app.router.add_get("/client.js", client_js)
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/ports", ports)
     app.router.add_post("/api/connect", connect)
@@ -406,6 +409,11 @@ def create_app(config: AgentConfig) -> web.Application:
 
 async def index(request: web.Request) -> web.Response:
     return web.Response(text=INDEX_HTML, content_type="text/html")
+
+
+async def client_js(request: web.Request) -> web.Response:
+    path = Path(__file__).with_name("browser_client.js")
+    return web.FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
 async def status(request: web.Request) -> web.Response:
@@ -592,7 +600,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional path to agent config JSON.",
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind when no config file is used.")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind when no config file is used.")
     parser.add_argument("--port", default=9001, type=int, help="Port to bind when no config file is used.")
     return parser.parse_args()
 

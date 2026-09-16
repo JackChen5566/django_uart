@@ -1,9 +1,17 @@
 # Console Agent
 
-This agent runs on each Windows or Linux PC that owns serial ports. Django should only handle login, permissions, PC/device setup, and page rendering. Console data flows directly:
+This agent runs on each Windows or Linux PC that owns serial ports. Django should only handle login, permissions, PC/device setup, and page rendering. Console data flows from each user's browser to the agent on that same PC:
 
 ```text
 RU/device -> COMx or /dev/ttyUSBx -> local console-agent -> browser WebSocket
+```
+
+For a shared Django site, every client PC must run this local agent. The Django server must not open serial ports itself:
+
+```text
+PC-A browser -> http://127.0.0.1:9001 -> PC-A COM ports
+PC-B browser -> http://127.0.0.1:9001 -> PC-B COM ports
+Django server -> renders pages and stores metadata only
 ```
 
 ## Install
@@ -52,7 +60,7 @@ The home page lists the serial ports detected on the current PC. On Windows they
 
 Select a port and baudrate, then click `Connect`. After connecting, the port, baudrate, and refresh button are locked until `Disconnect`.
 
-To bind another host or port without a config file:
+The default bind address is `127.0.0.1:9001`, so only the browser on the same PC can reach the agent. To expose the agent on the LAN for special admin workflows, bind another host or port explicitly:
 
 ```powershell
 python.exe -m console_agent.agent --host 0.0.0.0 --port 9001
@@ -112,7 +120,7 @@ Linux:
 .venv/bin/python -m console_agent.agent --config ./console_agent/config.json
 ```
 
-The default service address is `http://PC-IP:9001`.
+The default service address is `http://127.0.0.1:9001`.
 
 ## HTTP API
 
@@ -148,10 +156,10 @@ GET /api/commands
 
 ## WebSocket
 
-Connect the browser directly to the PC agent:
+Connect the browser directly to the agent running on the same PC:
 
 ```javascript
-const ws = new WebSocket("ws://192.168.1.101:9001/ws/console?port=COM3&baudrate=115200");
+const ws = new WebSocket("ws://127.0.0.1:9001/ws/console?port=COM3&baudrate=115200");
 
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
@@ -167,12 +175,41 @@ ws.send(JSON.stringify({ type: "quick_command", name: "version" }));
 For Linux, use the tty path:
 
 ```javascript
-new WebSocket("ws://192.168.1.101:9001/ws/console?port=/dev/ttyUSB3&baudrate=115200");
+new WebSocket("ws://127.0.0.1:9001/ws/console?port=/dev/ttyUSB3&baudrate=115200");
 ```
+
+## Django Integration
+
+In the Django page, talk to the local agent from browser JavaScript. Do not route console traffic through a Django view, because that would access the Django server PC's serial ports.
+
+You can serve your own copy of `browser_client.js`, or load it from the local agent while it is running:
+
+```html
+<script src="http://127.0.0.1:9001/client.js"></script>
+<script>
+  (async () => {
+    const terminal = document.querySelector("#terminal");
+    const agent = new LocalConsoleAgent({ agentUrl: "http://127.0.0.1:9001" });
+
+    const ports = await agent.ports();
+    const ws = agent.openConsole(
+      { port: ports[0].device, baudrate: 115200 },
+      {
+        serial: (text) => terminal.textContent += text,
+        error: (error) => console.error(error),
+      },
+    );
+
+    agent.sendCommand(ws, "cat /etc/version\n");
+  })();
+</script>
+```
+
+The browser resolves `127.0.0.1` on the user's PC, not on the Django server. That is the key point that lets each PC read its own local console.
 
 ## HTTPS Django Pages
 
-Browsers usually block `ws://` from an `https://` page. In production, configure TLS on the agent and use `wss://`.
+If your browser blocks `ws://127.0.0.1` from an `https://` Django page, configure TLS on the agent and use `https://127.0.0.1:9001` plus `wss://127.0.0.1:9001`.
 
 Set these in `config.json`:
 
@@ -186,21 +223,21 @@ Set these in `config.json`:
 Then connect with:
 
 ```javascript
-new WebSocket("wss://192.168.1.101:9001/ws/console?port=COM3&baudrate=115200");
+new WebSocket("wss://127.0.0.1:9001/ws/console?port=COM3&baudrate=115200");
 ```
 
-## Notes For Django Integration
+## PC Metadata
 
-Django should return PC metadata only, for example:
+Django can still return PC metadata for display or default choices, for example:
 
 ```json
 {
   "name": "SQA-PC-01",
-  "agent_url": "https://192.168.1.101:9001",
+  "agent_url": "http://127.0.0.1:9001",
   "devices": [
     { "name": "RU-01", "port": "COM3", "baudrate": 115200, "profile": "O-RU" }
   ]
 }
 ```
 
-The browser then calls the selected PC agent directly. Serial logs and command traffic never pass through Django.
+The browser then calls its local agent directly. Serial logs and command traffic never pass through Django.
