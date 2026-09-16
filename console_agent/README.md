@@ -68,6 +68,8 @@ http://server-ip:9001/
 
 The page itself connects console APIs to `http://127.0.0.1:9001`, which means each browser reads the serial ports on its own PC. If you want a client PC's agent to be local-only, run it with `--host 127.0.0.1`.
 
+Quick commands are loaded from the PC that served the web page, so all users see the server's command buttons. When a user clicks one, the page sends the actual command text to that user's local console connection.
+
 ## Optional Config
 
 You only need a config file if you want fixed PC names, TLS, custom quick commands, or predefined device metadata.
@@ -122,7 +124,7 @@ Linux:
 .venv/bin/python -m console_agent.agent --config ./console_agent/config.json
 ```
 
-The default page address is `http://PC-IP:9001`. Console API calls from the browser use `http://127.0.0.1:9001`.
+The default page address is `http://PC-IP:9001`. Console API calls from the browser use `http://127.0.0.1:9001`. Quick command definitions come from `http://PC-IP:9001/api/commands`.
 
 ## HTTP API
 

@@ -241,6 +241,13 @@ INDEX_HTML = """<!doctype html>
       return data;
     }
 
+    async function fetchPageJson(path, options) {
+      const response = await fetch(path, options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || data.message || response.statusText);
+      return data;
+    }
+
     function append(text) {
       terminal.textContent += text;
       terminal.scrollTop = terminal.scrollHeight;
@@ -289,7 +296,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadCommands() {
-      const data = await fetchJson("/api/commands");
+      const data = await fetchPageJson("/api/commands");
       state.commands = data.commands || {};
       const quick = $("quick");
       quick.innerHTML = "";
@@ -366,7 +373,13 @@ INDEX_HTML = """<!doctype html>
 
     function sendQuick(name) {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-      state.ws.send(JSON.stringify({ type: "quick_command", name }));
+      const command = state.commands[name];
+      if (command === undefined) {
+        setStatus(`Unknown quick command: ${name}`, "error");
+        return;
+      }
+      const data = command.endsWith("\\n") ? command : `${command}\\n`;
+      state.ws.send(JSON.stringify({ type: "command", data }));
     }
 
     $("refreshPorts").addEventListener("click", loadPorts);
