@@ -17,7 +17,7 @@ class SerialSettings:
     parity: str = "N"
     stopbits: float = 1
     timeout: float = 0.1
-    write_timeout: float = 1
+    write_timeout: float = 5
 
 
 class SerialManager:
@@ -96,6 +96,11 @@ class SerialSession:
         if self._serial is None:
             raise RuntimeError("Serial session is not open")
         async with self._write_lock:
-            await asyncio.to_thread(self._serial.write, data)
-            await asyncio.to_thread(self._serial.flush)
-
+            try:
+                await asyncio.to_thread(self._serial.write, data)
+                await asyncio.to_thread(self._serial.flush)
+            except serial.SerialTimeoutException as exc:
+                raise TimeoutError(
+                    f"Serial write timeout on {self.settings.port}. "
+                    "Check device power/cable, baudrate, and flow control, then try again."
+                ) from exc

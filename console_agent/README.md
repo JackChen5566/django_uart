@@ -84,6 +84,10 @@ http://server-ip:9001/
 
 If the page shows `Local agent not available`, the browser cannot reach `http://127.0.0.1:9001` on that client PC. Start the local agent on that PC and click `Refresh ports`.
 
+If `127.0.0.1` fails on a browser, the page also tries `http://localhost:9001`. You can edit `Local agent URL` on the page and click `Apply` to test another local address.
+
+If the terminal shows `Serial write timeout`, the browser and agent are connected, but the selected serial device did not accept outgoing data. Check the selected COM port, cable/power, baudrate, and hardware flow-control settings, then send again or reconnect.
+
 ## Optional Config
 
 You only need a config file if you want fixed PC names, TLS, custom quick commands, or predefined device metadata.

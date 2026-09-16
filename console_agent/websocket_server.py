@@ -164,6 +164,12 @@ INDEX_HTML = """<!doctype html>
       font-size: 12px;
       margin-top: 10px;
     }
+    .inline-row {
+      display: grid;
+      grid-template-columns: 1fr 88px;
+      gap: 8px;
+      align-items: center;
+    }
     @media (max-width: 820px) {
       .layout { grid-template-columns: 1fr; }
       .terminal-wrap { min-height: 560px; }
@@ -182,6 +188,12 @@ INDEX_HTML = """<!doctype html>
     <div class="layout">
       <aside>
         <button id="refreshPorts" type="button">Refresh ports</button>
+
+        <label for="agentUrl">Local agent URL</label>
+        <div class="inline-row">
+          <input id="agentUrl" type="text" value="http://127.0.0.1:9001">
+          <button id="applyAgentUrl" type="button">Apply</button>
+        </div>
 
         <label for="port">Serial port</label>
         <select id="port"></select>
@@ -210,10 +222,17 @@ INDEX_HTML = """<!doctype html>
   </main>
 
   <script>
-    const LOCAL_AGENT_URL = "http://127.0.0.1:9001";
+    const LOCAL_AGENT_CANDIDATES = ["http://127.0.0.1:9001", "http://localhost:9001"];
     const DEFAULT_BAUDRATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
-    const state = { ws: null, commands: {}, connected: false, localAgentOnline: false };
+    const state = {
+      ws: null,
+      commands: {},
+      connected: false,
+      localAgentOnline: false,
+      localAgentUrl: LOCAL_AGENT_CANDIDATES[0],
+    };
     const $ = (id) => document.getElementById(id);
+    const agentUrlInput = $("agentUrl");
     const portSelect = $("port");
     const baudrateSelect = $("baudrate");
     const terminal = $("terminal");
@@ -229,8 +248,16 @@ INDEX_HTML = """<!doctype html>
       return error && error.message ? error.message : String(error);
     }
 
-    function apiUrl(path, params = {}) {
-      const url = new URL(path, `${LOCAL_AGENT_URL}/`);
+    function normalizeAgentUrl(value) {
+      const url = new URL(value);
+      url.pathname = "";
+      url.search = "";
+      url.hash = "";
+      return url.toString().replace(/\/$/, "");
+    }
+
+    function apiUrl(baseUrl, path, params = {}) {
+      const url = new URL(path, `${baseUrl}/`);
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined && value !== null && value !== "") {
           url.searchParams.set(key, value);
@@ -239,8 +266,14 @@ INDEX_HTML = """<!doctype html>
       return url;
     }
 
-    async function fetchJson(path, options) {
-      const response = await fetch(apiUrl(path), options);
+    async function fetchJson(baseUrl, path, options = {}) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch(apiUrl(baseUrl, path), {
+        cache: "no-store",
+        ...options,
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || data.message || response.statusText);
       return data;
@@ -251,6 +284,28 @@ INDEX_HTML = """<!doctype html>
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || data.message || response.statusText);
       return data;
+    }
+
+    async function detectLocalAgent(preferredUrl) {
+      const candidates = [];
+      if (preferredUrl) candidates.push(preferredUrl);
+      for (const url of LOCAL_AGENT_CANDIDATES) {
+        if (!candidates.includes(url)) candidates.push(url);
+      }
+
+      const failures = [];
+      for (const candidate of candidates) {
+        try {
+          const baseUrl = normalizeAgentUrl(candidate);
+          const status = await fetchJson(baseUrl, "/api/status");
+          state.localAgentUrl = baseUrl;
+          agentUrlInput.value = baseUrl;
+          return status;
+        } catch (error) {
+          failures.push(`${candidate}: ${errorText(error)}`);
+        }
+      }
+      throw new Error(failures.join("; "));
     }
 
     function append(text) {
@@ -282,14 +337,14 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadStatus() {
-      const data = await fetchJson("/api/status");
+      const data = await detectLocalAgent(agentUrlInput.value);
       loadDefaultBaudrates(data.default_baudrate, data.baudrates);
       state.localAgentOnline = true;
-      setStatus(`${data.name} online`);
+      setStatus(`${data.name} online via ${state.localAgentUrl}`);
     }
 
     async function loadPorts() {
-      const ports = await fetchJson("/api/ports");
+      const ports = await fetchJson(state.localAgentUrl, "/api/ports");
       portSelect.innerHTML = "";
 
       if (!ports.length) {
@@ -342,7 +397,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function wsUrl() {
-      const agent = new URL(LOCAL_AGENT_URL);
+      const agent = new URL(state.localAgentUrl);
       const scheme = agent.protocol === "https:" ? "wss" : "ws";
       const params = new URLSearchParams({
         port: portSelect.value,
@@ -420,6 +475,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     $("refreshPorts").addEventListener("click", loadLocalAgent);
+    $("applyAgentUrl").addEventListener("click", loadLocalAgent);
     $("connect").addEventListener("click", connect);
     $("disconnect").addEventListener("click", disconnect);
     $("send").addEventListener("click", sendCommand);
@@ -597,12 +653,17 @@ async def websocket_to_serial(
     profile: str,
 ) -> None:
     async for message in ws:
-        if message.type == WSMsgType.TEXT:
-            await handle_ws_text(message.data, session, manager, profile)
-        elif message.type == WSMsgType.BINARY:
-            await session.write_bytes(message.data)
-        elif message.type in {WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED, WSMsgType.ERROR}:
-            break
+        try:
+            if message.type == WSMsgType.TEXT:
+                await handle_ws_text(message.data, session, manager, profile)
+            elif message.type == WSMsgType.BINARY:
+                await session.write_bytes(message.data)
+            elif message.type in {WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED, WSMsgType.ERROR}:
+                break
+        except Exception as exc:
+            LOGGER.warning("Serial write failed: %s", exc)
+            if not ws.closed:
+                await ws.send_json({"type": "error", "message": str(exc)})
 
 
 async def handle_ws_text(
@@ -650,6 +711,8 @@ def settings_from_payload(payload: Any, config: AgentConfig) -> SerialSettings:
         bytesize=int(payload.get("bytesize", 8)),
         parity=str(payload.get("parity", "N")).upper(),
         stopbits=float(payload.get("stopbits", 1)),
+        timeout=float(payload.get("timeout", 0.1)),
+        write_timeout=float(payload.get("write_timeout", 5)),
     )
 
 
