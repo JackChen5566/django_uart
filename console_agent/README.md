@@ -16,6 +16,88 @@ server PC -> serves the page, but does not proxy console traffic
 
 ## Install
 
+You have two deployment choices:
+
+- Build one standalone agent binary for client PCs. This avoids copying the project and avoids installing Python packages on every PC.
+- Use the Python source install below when developing or debugging.
+
+## Build A Windows Client EXE
+
+Build this once on a Windows PC that has Python:
+
+```powershell
+cd C:\path\to\django_uart
+.\scripts\build_windows_agent.ps1
+```
+
+The build output is:
+
+```text
+dist\console-agent.exe
+```
+
+Copy only that `.exe` to each client PC. On every client PC that needs to read its own serial device, run:
+
+```powershell
+.\console-agent.exe --host 127.0.0.1 --port 9001
+```
+
+Then open the shared web page from that client PC:
+
+```text
+http://server-ip:9001/
+```
+
+This avoids copying the full project or running `pip install` on each client PC. The client PC still needs to run the small local agent process, because a server webpage cannot directly access another PC's COM ports.
+
+After `dist\console-agent.exe` exists on the server PC, the built-in web page also exposes it for download:
+
+```text
+http://server-ip:9001/downloads/console-agent.exe
+```
+
+The page shows a `Download Windows agent` link. If the link returns 404, build the exe first and restart or refresh the server page.
+
+## Build A Linux Client Binary
+
+Build this once on a Linux PC that has Python 3:
+
+```bash
+cd /path/to/django_uart
+bash ./scripts/build_linux_agent.sh
+```
+
+The build output is:
+
+```text
+dist/console-agent
+```
+
+Copy only that binary to each Linux client PC. On every Linux client PC that needs to read its own serial device, run:
+
+```bash
+chmod +x ./console-agent
+./console-agent --host 127.0.0.1 --port 9001
+```
+
+Then open the shared web page from that Linux client PC:
+
+```text
+http://server-ip:9001/
+```
+
+PyInstaller builds are OS-specific. Build the Windows `.exe` on Windows and the Linux binary on Linux.
+
+Linux users usually need serial permission before `/dev/ttyUSB*` or `/dev/ttyACM*` ports are readable:
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+Log out and back in after changing group membership. For a quick temporary test, you can run the agent with a user that already has permission to the serial device.
+
+## Python Source Install
+
 Windows PowerShell:
 
 ```powershell
@@ -41,13 +123,33 @@ Config is optional. The simplest run command is:
 Windows:
 
 ```powershell
-python.exe -m console_agent.agent
+python -m console_agent.agent
+```
+
+If Windows does not have `python`, try:
+
+```powershell
+py -m console_agent.agent
 ```
 
 Linux:
 
 ```bash
 python3 -m console_agent.agent
+```
+
+Run the command from the project root directory, the folder that contains `console_agent`:
+
+```powershell
+cd C:\path\to\django_uart
+python -m console_agent.agent
+```
+
+The module name uses an underscore. Do not include a backslash:
+
+```text
+Correct:   python -m console_agent.agent
+Wrong:     python3 -m console\_agent.agent
 ```
 
 Then open:
@@ -73,7 +175,7 @@ Quick commands are loaded from the PC that served the web page, so all users see
 For every client PC that needs to read its own serial device:
 
 ```powershell
-python.exe -m console_agent.agent --host 127.0.0.1 --port 9001
+python -m console_agent.agent --host 127.0.0.1 --port 9001
 ```
 
 Then open the shared page from that PC:

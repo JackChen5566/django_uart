@@ -170,6 +170,19 @@ INDEX_HTML = """<!doctype html>
       gap: 8px;
       align-items: center;
     }
+    .download-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 38px;
+      border: 1px solid #2a84aa;
+      border-radius: 6px;
+      background: #116487;
+      color: var(--text);
+      text-decoration: none;
+      margin-bottom: 12px;
+    }
     @media (max-width: 820px) {
       .layout { grid-template-columns: 1fr; }
       .terminal-wrap { min-height: 560px; }
@@ -187,6 +200,7 @@ INDEX_HTML = """<!doctype html>
     </header>
     <div class="layout">
       <aside>
+        <a class="download-link" href="/downloads/console-agent.exe" download>Download Windows agent</a>
         <button id="refreshPorts" type="button">Refresh ports</button>
 
         <label for="agentUrl">Local agent URL</label>
@@ -523,6 +537,7 @@ def create_app(config: AgentConfig) -> web.Application:
     app["active_ports"] = set()
     app.router.add_get("/", index)
     app.router.add_get("/client.js", client_js)
+    app.router.add_get("/downloads/console-agent.exe", windows_agent_download)
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/ports", ports)
     app.router.add_post("/api/connect", connect)
@@ -538,6 +553,22 @@ async def index(request: web.Request) -> web.Response:
 async def client_js(request: web.Request) -> web.Response:
     path = Path(__file__).with_name("browser_client.js")
     return web.FileResponse(path, headers={"Cache-Control": "no-store"})
+
+
+async def windows_agent_download(request: web.Request) -> web.StreamResponse:
+    path = Path(__file__).resolve().parent.parent / "dist" / "console-agent.exe"
+    if not path.exists():
+        return web.Response(
+            status=404,
+            text="console-agent.exe is not built yet. Run scripts/build_windows_agent.ps1 first.",
+        )
+    return web.FileResponse(
+        path,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": 'attachment; filename="console-agent.exe"',
+        },
+    )
 
 
 async def status(request: web.Request) -> web.Response:
