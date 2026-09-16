@@ -6,12 +6,12 @@ This agent runs on each Windows or Linux PC that owns serial ports. Django shoul
 RU/device -> COMx or /dev/ttyUSBx -> local console-agent -> browser WebSocket
 ```
 
-For a shared Django site, every client PC must run this local agent. The Django server must not open serial ports itself:
+For a shared site, one PC can expose the web page by IP, but every client PC must also run its own local agent. The web page may come from the server IP; console traffic still goes to `127.0.0.1:9001` in each browser:
 
 ```text
-PC-A browser -> http://127.0.0.1:9001 -> PC-A COM ports
-PC-B browser -> http://127.0.0.1:9001 -> PC-B COM ports
-Django server -> renders pages and stores metadata only
+PC-A browser -> http://server-ip:9001 page -> http://127.0.0.1:9001 -> PC-A COM ports
+PC-B browser -> http://server-ip:9001 page -> http://127.0.0.1:9001 -> PC-B COM ports
+server PC -> serves the page, but does not proxy console traffic
 ```
 
 ## Install
@@ -60,11 +60,13 @@ The home page lists the serial ports detected on the current PC. On Windows they
 
 Select a port and baudrate, then click `Connect`. After connecting, the port, baudrate, and refresh button are locked until `Disconnect`.
 
-The default bind address is `127.0.0.1:9001`, so only the browser on the same PC can reach the agent. To expose the agent on the LAN for special admin workflows, bind another host or port explicitly:
+The default bind address is `0.0.0.0:9001`, so other devices on the LAN can open the page by IP:
 
-```powershell
-python.exe -m console_agent.agent --host 0.0.0.0 --port 9001
+```text
+http://server-ip:9001/
 ```
+
+The page itself connects console APIs to `http://127.0.0.1:9001`, which means each browser reads the serial ports on its own PC. If you want a client PC's agent to be local-only, run it with `--host 127.0.0.1`.
 
 ## Optional Config
 
@@ -120,7 +122,7 @@ Linux:
 .venv/bin/python -m console_agent.agent --config ./console_agent/config.json
 ```
 
-The default service address is `http://127.0.0.1:9001`.
+The default page address is `http://PC-IP:9001`. Console API calls from the browser use `http://127.0.0.1:9001`.
 
 ## HTTP API
 

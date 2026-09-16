@@ -210,6 +210,7 @@ INDEX_HTML = """<!doctype html>
   </main>
 
   <script>
+    const LOCAL_AGENT_URL = "http://127.0.0.1:9001";
     const state = { ws: null, commands: {}, connected: false };
     const $ = (id) => document.getElementById(id);
     const portSelect = $("port");
@@ -221,6 +222,23 @@ INDEX_HTML = """<!doctype html>
     function setStatus(text, cls = "") {
       statusEl.textContent = text;
       statusEl.className = `status ${cls}`.trim();
+    }
+
+    function apiUrl(path, params = {}) {
+      const url = new URL(path, `${LOCAL_AGENT_URL}/`);
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          url.searchParams.set(key, value);
+        }
+      }
+      return url;
+    }
+
+    async function fetchJson(path, options) {
+      const response = await fetch(apiUrl(path), options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || data.message || response.statusText);
+      return data;
     }
 
     function append(text) {
@@ -243,8 +261,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadStatus() {
-      const response = await fetch("/api/status");
-      const data = await response.json();
+      const data = await fetchJson("/api/status");
       baudrateSelect.innerHTML = "";
       for (const rate of data.baudrates) {
         const option = new Option(rate, rate);
@@ -255,8 +272,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadPorts() {
-      const response = await fetch("/api/ports");
-      const ports = await response.json();
+      const ports = await fetchJson("/api/ports");
       portSelect.innerHTML = "";
 
       if (!ports.length) {
@@ -273,8 +289,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadCommands() {
-      const response = await fetch("/api/commands");
-      const data = await response.json();
+      const data = await fetchJson("/api/commands");
       state.commands = data.commands || {};
       const quick = $("quick");
       quick.innerHTML = "";
@@ -291,12 +306,13 @@ INDEX_HTML = """<!doctype html>
     }
 
     function wsUrl() {
-      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      const agent = new URL(LOCAL_AGENT_URL);
+      const scheme = agent.protocol === "https:" ? "wss" : "ws";
       const params = new URLSearchParams({
         port: portSelect.value,
         baudrate: baudrateSelect.value,
       });
-      return `${scheme}://${location.host}/ws/console?${params}`;
+      return `${scheme}://${agent.host}/ws/console?${params}`;
     }
 
     function connect() {
@@ -362,7 +378,7 @@ INDEX_HTML = """<!doctype html>
     });
 
     Promise.all([loadStatus(), loadPorts(), loadCommands()]).catch((error) => {
-      setStatus(error.message, "error");
+      setStatus(`Local agent unavailable: ${error.message}`, "error");
     });
   </script>
 </body>
@@ -600,7 +616,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional path to agent config JSON.",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind when no config file is used.")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind when no config file is used.")
     parser.add_argument("--port", default=9001, type=int, help="Port to bind when no config file is used.")
     return parser.parse_args()
 
