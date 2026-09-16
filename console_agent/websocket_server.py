@@ -211,7 +211,8 @@ INDEX_HTML = """<!doctype html>
 
   <script>
     const LOCAL_AGENT_URL = "http://127.0.0.1:9001";
-    const state = { ws: null, commands: {}, connected: false };
+    const DEFAULT_BAUDRATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+    const state = { ws: null, commands: {}, connected: false, localAgentOnline: false };
     const $ = (id) => document.getElementById(id);
     const portSelect = $("port");
     const baudrateSelect = $("baudrate");
@@ -222,6 +223,10 @@ INDEX_HTML = """<!doctype html>
     function setStatus(text, cls = "") {
       statusEl.textContent = text;
       statusEl.className = `status ${cls}`.trim();
+    }
+
+    function errorText(error) {
+      return error && error.message ? error.message : String(error);
     }
 
     function apiUrl(path, params = {}) {
@@ -267,14 +272,19 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
-    async function loadStatus() {
-      const data = await fetchJson("/api/status");
+    function loadDefaultBaudrates(defaultBaudrate = 115200, baudrates = DEFAULT_BAUDRATES) {
       baudrateSelect.innerHTML = "";
-      for (const rate of data.baudrates) {
+      for (const rate of baudrates) {
         const option = new Option(rate, rate);
-        if (rate === data.default_baudrate) option.selected = true;
+        if (rate === defaultBaudrate) option.selected = true;
         baudrateSelect.add(option);
       }
+    }
+
+    async function loadStatus() {
+      const data = await fetchJson("/api/status");
+      loadDefaultBaudrates(data.default_baudrate, data.baudrates);
+      state.localAgentOnline = true;
       setStatus(`${data.name} online`);
     }
 
@@ -293,6 +303,25 @@ INDEX_HTML = """<!doctype html>
         portSelect.add(new Option(label, port.device));
       }
       setStatus(`${ports.length} port(s) found`);
+    }
+
+    async function loadLocalAgent() {
+      portSelect.innerHTML = "";
+      portSelect.add(new Option("Loading local ports...", ""));
+      loadDefaultBaudrates();
+      $("connect").disabled = true;
+
+      try {
+        await loadStatus();
+        await loadPorts();
+        $("connect").disabled = !portSelect.value;
+      } catch (error) {
+        state.localAgentOnline = false;
+        portSelect.innerHTML = "";
+        portSelect.add(new Option("Local agent not available", ""));
+        $("connect").disabled = true;
+        setStatus(`Local agent unavailable: ${errorText(error)}`, "error");
+      }
     }
 
     async function loadCommands() {
@@ -323,6 +352,10 @@ INDEX_HTML = """<!doctype html>
     }
 
     function connect() {
+      if (!state.localAgentOnline) {
+        setStatus("Start the local agent on this PC, then refresh ports", "error");
+        return;
+      }
       if (!portSelect.value) {
         setStatus("Select a serial port first", "error");
         return;
@@ -334,13 +367,15 @@ INDEX_HTML = """<!doctype html>
 
       ws.onopen = () => {
         setLocked(true);
-        append(`\\n[connected ${portSelect.value} @ ${baudrateSelect.value}]\\n`);
       };
 
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
         if (message.type === "serial") append(message.data);
-        if (message.type === "connected") setStatus(`${message.port} connected`, "connected");
+        if (message.type === "connected") {
+          setStatus(`${message.port} connected`, "connected");
+          append(`\\n[connected ${message.port} @ ${message.baudrate}]\\n`);
+        }
         if (message.type === "error") {
           append(`\\n[error] ${message.message}\\n`);
           setStatus(message.message, "error");
@@ -369,6 +404,7 @@ INDEX_HTML = """<!doctype html>
       if (!value) return;
       state.ws.send(JSON.stringify({ type: "command", data: `${value}\\n` }));
       commandInput.value = "";
+      setStatus("Command sent", "connected");
     }
 
     function sendQuick(name) {
@@ -380,9 +416,10 @@ INDEX_HTML = """<!doctype html>
       }
       const data = command.endsWith("\\n") ? command : `${command}\\n`;
       state.ws.send(JSON.stringify({ type: "command", data }));
+      setStatus(`${name} sent`, "connected");
     }
 
-    $("refreshPorts").addEventListener("click", loadPorts);
+    $("refreshPorts").addEventListener("click", loadLocalAgent);
     $("connect").addEventListener("click", connect);
     $("disconnect").addEventListener("click", disconnect);
     $("send").addEventListener("click", sendCommand);
@@ -390,9 +427,11 @@ INDEX_HTML = """<!doctype html>
       if (event.key === "Enter") sendCommand();
     });
 
-    Promise.all([loadStatus(), loadPorts(), loadCommands()]).catch((error) => {
-      setStatus(`Local agent unavailable: ${error.message}`, "error");
+    loadDefaultBaudrates();
+    loadCommands().catch((error) => {
+      setStatus(`Quick commands unavailable: ${errorText(error)}`, "error");
     });
+    loadLocalAgent();
   </script>
 </body>
 </html>

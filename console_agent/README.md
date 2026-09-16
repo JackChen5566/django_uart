@@ -70,6 +70,20 @@ The page itself connects console APIs to `http://127.0.0.1:9001`, which means ea
 
 Quick commands are loaded from the PC that served the web page, so all users see the server's command buttons. When a user clicks one, the page sends the actual command text to that user's local console connection.
 
+For every client PC that needs to read its own serial device:
+
+```powershell
+python.exe -m console_agent.agent --host 127.0.0.1 --port 9001
+```
+
+Then open the shared page from that PC:
+
+```text
+http://server-ip:9001/
+```
+
+If the page shows `Local agent not available`, the browser cannot reach `http://127.0.0.1:9001` on that client PC. Start the local agent on that PC and click `Refresh ports`.
+
 ## Optional Config
 
 You only need a config file if you want fixed PC names, TLS, custom quick commands, or predefined device metadata.
