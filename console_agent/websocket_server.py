@@ -170,6 +170,15 @@ INDEX_HTML = """<!doctype html>
       gap: 8px;
       align-items: center;
     }
+    .config-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .file-input {
+      display: none;
+    }
     .download-link {
       display: inline-flex;
       align-items: center;
@@ -200,7 +209,7 @@ INDEX_HTML = """<!doctype html>
     </header>
     <div class="layout">
       <aside>
-        <a class="download-link" href="/downloads/console-agent.exe" download>Download Windows agent</a>
+        <a class="download-link" href="/downloads/console-agent-windows-installer.zip" download>Download Windows installer</a>
         <button id="refreshPorts" type="button">Refresh ports</button>
 
         <label for="agentUrl">Local agent URL</label>
@@ -223,6 +232,14 @@ INDEX_HTML = """<!doctype html>
         <label>Quick command</label>
         <div id="quick" class="quick"></div>
         <div class="hint">After connecting, port settings are locked until Disconnect.</div>
+
+        <label>RU manager config</label>
+        <input id="ruConfigFile" class="file-input" type="file" accept="application/json,.json">
+        <div class="config-row">
+          <button id="loadRuConfig" type="button">Load JSON</button>
+          <button id="applyRuConfig" class="primary" type="button" disabled>Apply settings</button>
+        </div>
+        <div id="ruConfigSummary" class="hint">No JSON loaded.</div>
       </aside>
 
       <section class="terminal-wrap">
@@ -244,6 +261,9 @@ INDEX_HTML = """<!doctype html>
       connected: false,
       localAgentOnline: false,
       localAgentUrl: LOCAL_AGENT_CANDIDATES[0],
+      ansiStyle: {},
+      ruConfig: null,
+      ruConfigName: "",
     };
     const $ = (id) => document.getElementById(id);
     const agentUrlInput = $("agentUrl");
@@ -252,6 +272,21 @@ INDEX_HTML = """<!doctype html>
     const terminal = $("terminal");
     const statusEl = $("status");
     const commandInput = $("command");
+    const ruConfigFileInput = $("ruConfigFile");
+    const ESC = String.fromCharCode(27);
+    const BEL = String.fromCharCode(7);
+    const ANSI_COLORS = {
+      30: "#2f343f", 31: "#ff6b6b", 32: "#74d99f", 33: "#ffd166",
+      34: "#5cc8ff", 35: "#d98cff", 36: "#67e8f9", 37: "#eef2f8",
+      90: "#8b95a7", 91: "#ff8f8f", 92: "#9af0ba", 93: "#ffe08a",
+      94: "#8edaff", 95: "#e8b0ff", 96: "#9bf2ff", 97: "#ffffff",
+    };
+    const ANSI_BACKGROUNDS = {
+      40: "#2f343f", 41: "#8c3434", 42: "#23603d", 43: "#7a5a16",
+      44: "#1c5770", 45: "#5f3b75", 46: "#23616a", 47: "#eef2f8",
+      100: "#5b6473", 101: "#a94444", 102: "#2f7d50", 103: "#9f7720",
+      104: "#2a84aa", 105: "#7d4f98", 106: "#2f8894", 107: "#ffffff",
+    };
 
     function setStatus(text, cls = "") {
       statusEl.textContent = text;
@@ -322,8 +357,114 @@ INDEX_HTML = """<!doctype html>
       throw new Error(failures.join("; "));
     }
 
+    function xterm256Color(index) {
+      if (index < 0 || index > 255) return null;
+      const base = [
+        "#000000", "#cd0000", "#00cd00", "#cdcd00", "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
+        "#7f7f7f", "#ff0000", "#00ff00", "#ffff00", "#5c5cff", "#ff00ff", "#00ffff", "#ffffff",
+      ];
+      if (index < 16) return base[index];
+      if (index >= 232) {
+        const level = 8 + (index - 232) * 10;
+        return `rgb(${level}, ${level}, ${level})`;
+      }
+      const value = [0, 95, 135, 175, 215, 255];
+      const offset = index - 16;
+      const red = value[Math.floor(offset / 36) % 6];
+      const green = value[Math.floor(offset / 6) % 6];
+      const blue = value[offset % 6];
+      return `rgb(${red}, ${green}, ${blue})`;
+    }
+
+    function applySgr(params) {
+      if (!params.length) params = [0];
+      for (let i = 0; i < params.length; i += 1) {
+        const code = params[i];
+        if (code === 0) state.ansiStyle = {};
+        else if (code === 1) state.ansiStyle.bold = true;
+        else if (code === 2) state.ansiStyle.dim = true;
+        else if (code === 4) state.ansiStyle.underline = true;
+        else if (code === 7) state.ansiStyle.inverse = true;
+        else if (code === 22) {
+          delete state.ansiStyle.bold;
+          delete state.ansiStyle.dim;
+        } else if (code === 24) delete state.ansiStyle.underline;
+        else if (code === 27) delete state.ansiStyle.inverse;
+        else if (code === 39) delete state.ansiStyle.color;
+        else if (code === 49) delete state.ansiStyle.backgroundColor;
+        else if (ANSI_COLORS[code]) state.ansiStyle.color = ANSI_COLORS[code];
+        else if (ANSI_BACKGROUNDS[code]) state.ansiStyle.backgroundColor = ANSI_BACKGROUNDS[code];
+        else if ((code === 38 || code === 48) && params[i + 1] === 5) {
+          const color = xterm256Color(params[i + 2]);
+          if (color && code === 38) state.ansiStyle.color = color;
+          if (color && code === 48) state.ansiStyle.backgroundColor = color;
+          i += 2;
+        } else if ((code === 38 || code === 48) && params[i + 1] === 2) {
+          const red = params[i + 2];
+          const green = params[i + 3];
+          const blue = params[i + 4];
+          if ([red, green, blue].every((value) => Number.isFinite(value) && value >= 0 && value <= 255)) {
+            const color = `rgb(${red}, ${green}, ${blue})`;
+            if (code === 38) state.ansiStyle.color = color;
+            if (code === 48) state.ansiStyle.backgroundColor = color;
+          }
+          i += 4;
+        }
+      }
+    }
+
+    function appendStyledText(text) {
+      if (!text) return;
+      const style = state.ansiStyle;
+      const foreground = style.inverse ? style.backgroundColor : style.color;
+      const background = style.inverse ? style.color : style.backgroundColor;
+      const hasStyle = foreground || background || style.bold || style.dim || style.underline;
+
+      if (!hasStyle) {
+        terminal.appendChild(document.createTextNode(text));
+        return;
+      }
+
+      const span = document.createElement("span");
+      if (foreground) span.style.color = foreground;
+      if (background) span.style.backgroundColor = background;
+      if (style.bold) span.style.fontWeight = "700";
+      if (style.dim) span.style.opacity = "0.72";
+      if (style.underline) span.style.textDecoration = "underline";
+      span.textContent = text;
+      terminal.appendChild(span);
+    }
+
+    function trimTerminal() {
+      while (terminal.childNodes.length > 5000) {
+        terminal.removeChild(terminal.firstChild);
+      }
+    }
+
     function append(text) {
-      terminal.textContent += text;
+      const oscPattern = new RegExp(`${ESC}\\][\\s\\S]*?(?:${BEL}|${ESC}\\\\)`, "g");
+      const singleEscapePattern = new RegExp(`${ESC}[@-Z\\\\-_]`, "g");
+      const csiPattern = new RegExp(`${ESC}\\[([0-?]*)([ -/]*)([@-~])`, "g");
+      const stripped = text
+        .replace(oscPattern, "")
+        .replace(singleEscapePattern, "");
+      let cursor = 0;
+      let match;
+
+      while ((match = csiPattern.exec(stripped)) !== null) {
+        appendStyledText(stripped.slice(cursor, match.index));
+        cursor = csiPattern.lastIndex;
+
+        if (match[3] === "m") {
+          const params = match[1]
+            ? match[1].split(";").map((value) => (value === "" ? 0 : Number(value)))
+            : [0];
+          applySgr(params.filter((value) => Number.isFinite(value)));
+        }
+      }
+
+      appendStyledText(stripped.slice(cursor));
+      trimTerminal();
       terminal.scrollTop = terminal.scrollHeight;
     }
 
@@ -339,6 +480,11 @@ INDEX_HTML = """<!doctype html>
       for (const button of document.querySelectorAll("[data-command]")) {
         button.disabled = !locked;
       }
+      updateRuConfigButton();
+    }
+
+    function updateRuConfigButton() {
+      $("applyRuConfig").disabled = !state.connected || !state.ruConfig;
     }
 
     function loadDefaultBaudrates(defaultBaudrate = 115200, baudrates = DEFAULT_BAUDRATES) {
@@ -488,11 +634,109 @@ INDEX_HTML = """<!doctype html>
       setStatus(`${name} sent`, "connected");
     }
 
+    function isPlainObject(value) {
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+    }
+
+    function configValue(value) {
+      if (value === null || value === undefined) return "";
+      if (typeof value === "string") return value.replace(/\r\n?/g, "\n").replace(/\n/g, "\\n");
+      if (typeof value === "number" || typeof value === "boolean") return String(value);
+      return JSON.stringify(value);
+    }
+
+    function buildRuManagerConfig(data) {
+      if (!isPlainObject(data)) throw new Error("JSON root must be an object");
+
+      const lines = [];
+      for (const [key, value] of Object.entries(data)) {
+        if (!key) throw new Error("JSON contains an empty key");
+        if (/[\r\n]/.test(key)) throw new Error(`JSON key contains a line break: ${key}`);
+        lines.push(`${key}=${configValue(value)}`);
+      }
+
+      if (!lines.length) throw new Error("JSON object has no key/value pairs");
+      return `${lines.join("\n")}\n`;
+    }
+
+    function hereDocDelimiter(content) {
+      let delimiter = "RUMANAGER_CONF_EOF";
+      let index = 1;
+      while (content.includes(delimiter)) {
+        delimiter = `RUMANAGER_CONF_EOF_${index}`;
+        index += 1;
+      }
+      return delimiter;
+    }
+
+    function buildRuManagerCommand(data) {
+      const content = buildRuManagerConfig(data);
+      const delimiter = hereDocDelimiter(content);
+      return [
+        'tmp="/tmp/rumanager.conf.$$"',
+        `cat > "$tmp" <<'${delimiter}'`,
+        content.trimEnd(),
+        delimiter,
+        'if [ "$(id -u 2>/dev/null)" = "0" ]; then',
+        '  cp "$tmp" /etc/rumanager.conf',
+        "else",
+        '  sudo cp "$tmp" /etc/rumanager.conf',
+        "fi",
+        'rm -f "$tmp"',
+        "sync",
+        'echo "[rumanager.conf updated]"',
+        "",
+      ].join("\n");
+    }
+
+    async function loadRuConfigFile(file) {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!isPlainObject(data)) throw new Error("JSON root must be an object");
+      buildRuManagerConfig(data);
+
+      state.ruConfig = data;
+      state.ruConfigName = file.name;
+      $("ruConfigSummary").textContent = `${file.name}: ${Object.keys(data).length} key/value pair(s) loaded.`;
+      updateRuConfigButton();
+      setStatus(`Loaded ${file.name}`);
+    }
+
+    function applyRuConfig() {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        setStatus("Connect to the UART shell before applying settings", "error");
+        return;
+      }
+      if (!state.ruConfig) {
+        setStatus("Load a JSON config first", "error");
+        return;
+      }
+      if (!confirm("Overwrite /etc/rumanager.conf on the connected Linux system?")) return;
+
+      const command = buildRuManagerCommand(state.ruConfig);
+      state.ws.send(JSON.stringify({ type: "command", data: command }));
+      append(`\n[applying ${state.ruConfigName || "JSON"} to /etc/rumanager.conf]\n`);
+      setStatus("rumanager.conf apply command sent", "connected");
+    }
+
     $("refreshPorts").addEventListener("click", loadLocalAgent);
     $("applyAgentUrl").addEventListener("click", loadLocalAgent);
     $("connect").addEventListener("click", connect);
     $("disconnect").addEventListener("click", disconnect);
     $("send").addEventListener("click", sendCommand);
+    $("loadRuConfig").addEventListener("click", () => ruConfigFileInput.click());
+    $("applyRuConfig").addEventListener("click", applyRuConfig);
+    ruConfigFileInput.addEventListener("change", () => {
+      const file = ruConfigFileInput.files && ruConfigFileInput.files[0];
+      if (!file) return;
+      loadRuConfigFile(file).catch((error) => {
+        state.ruConfig = null;
+        state.ruConfigName = "";
+        $("ruConfigSummary").textContent = `JSON load failed: ${errorText(error)}`;
+        updateRuConfigButton();
+        setStatus(`JSON load failed: ${errorText(error)}`, "error");
+      });
+    });
     commandInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") sendCommand();
     });
@@ -538,6 +782,7 @@ def create_app(config: AgentConfig) -> web.Application:
     app.router.add_get("/", index)
     app.router.add_get("/client.js", client_js)
     app.router.add_get("/downloads/console-agent.exe", windows_agent_download)
+    app.router.add_get("/downloads/console-agent-windows-installer.zip", windows_installer_download)
     app.router.add_get("/api/status", status)
     app.router.add_get("/api/ports", ports)
     app.router.add_post("/api/connect", connect)
@@ -567,6 +812,22 @@ async def windows_agent_download(request: web.Request) -> web.StreamResponse:
         headers={
             "Cache-Control": "no-store",
             "Content-Disposition": 'attachment; filename="console-agent.exe"',
+        },
+    )
+
+
+async def windows_installer_download(request: web.Request) -> web.StreamResponse:
+    path = Path(__file__).resolve().parent.parent / "dist" / "console-agent-windows-installer.zip"
+    if not path.exists():
+        return web.Response(
+            status=404,
+            text="console-agent-windows-installer.zip is not built yet. Run scripts/build_windows_agent.ps1 first.",
+        )
+    return web.FileResponse(
+        path,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": 'attachment; filename="console-agent-windows-installer.zip"',
         },
     )
 

@@ -25,7 +25,19 @@ $PyInstaller = ".\.venv\Scripts\pyinstaller.exe"
     --add-data "console_agent\browser_client.js;console_agent" `
     .\run_console_agent.py
 
+$InstallerDir = ".\dist\windows-installer"
+New-Item -ItemType Directory -Path $InstallerDir -Force | Out-Null
+Copy-Item -LiteralPath ".\dist\$Name.exe" -Destination "$InstallerDir\console-agent.exe" -Force
+Copy-Item -LiteralPath ".\scripts\install.ps1" -Destination "$InstallerDir\install.ps1" -Force
+Copy-Item -LiteralPath ".\scripts\uninstall.ps1" -Destination "$InstallerDir\uninstall.ps1" -Force
+
+$ZipPath = ".\dist\console-agent-windows-installer.zip"
+if (Test-Path -LiteralPath $ZipPath) {
+    Remove-Item -LiteralPath $ZipPath -Force
+}
+Compress-Archive -Path "$InstallerDir\*" -DestinationPath $ZipPath
+
 Write-Host ""
 Write-Host "Built .\dist\$Name.exe"
-Write-Host "Client PCs can run:"
-Write-Host ".\dist\$Name.exe --host 127.0.0.1 --port 9001"
+Write-Host "Built $ZipPath"
+Write-Host "Client PCs should extract the zip and run install.ps1 as Administrator."

@@ -34,29 +34,77 @@ The build output is:
 
 ```text
 dist\console-agent.exe
+dist\console-agent-windows-installer.zip
 ```
 
-Copy only that `.exe` to each client PC. On every client PC that needs to read its own serial device, run:
+Use the installer zip for client PCs. It contains:
 
-```powershell
-.\console-agent.exe --host 127.0.0.1 --port 9001
+```text
+console-agent.exe
+install.ps1
+uninstall.ps1
 ```
 
-Then open the shared web page from that client PC:
+Copy or download the zip to each client PC, extract it, then run `install.ps1` from an elevated PowerShell window. After install, open the shared web page from that client PC:
 
 ```text
 http://server-ip:9001/
 ```
 
-This avoids copying the full project or running `pip install` on each client PC. The client PC still needs to run the small local agent process, because a server webpage cannot directly access another PC's COM ports.
+This avoids copying the full project or running `pip install` on each client PC. The client PC still runs a small local Windows service, because a server webpage cannot directly access another PC's COM ports.
 
-After `dist\console-agent.exe` exists on the server PC, the built-in web page also exposes it for download:
+After `dist\console-agent-windows-installer.zip` exists on the server PC, the built-in web page exposes it for download:
 
 ```text
-http://server-ip:9001/downloads/console-agent.exe
+http://server-ip:9001/downloads/console-agent-windows-installer.zip
 ```
 
-The page shows a `Download Windows agent` link. If the link returns 404, build the exe first and restart or refresh the server page.
+The page shows a `Download Windows installer` link. If the link returns 404, build the Windows agent first and restart or refresh the server page.
+
+## Install As A Windows Service
+
+To keep the client agent running after reboot, install it as a Windows service from an elevated PowerShell window on each client PC:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+This copies the exe to:
+
+```text
+C:\Program Files\ConsoleAgent\console-agent.exe
+```
+
+The service starts automatically at boot and runs:
+
+```text
+console-agent.exe --host 127.0.0.1 --port 9001
+```
+
+Check service status:
+
+```powershell
+Get-Service ConsoleAgent
+```
+
+Test the local agent:
+
+```text
+http://127.0.0.1:9001/api/status
+```
+
+Remove the service:
+
+```powershell
+.\uninstall.ps1
+```
+
+Remove the service and installed files:
+
+```powershell
+.\uninstall.ps1 -RemoveFiles
+```
 
 ## Build A Linux Client Binary
 
@@ -161,6 +209,10 @@ http://localhost:9001/
 The home page lists the serial ports detected on the current PC. On Windows they look like `COM3`; on Linux they look like `/dev/ttyUSB3` or `/dev/ttyACM0`.
 
 Select a port and baudrate, then click `Connect`. After connecting, the port, baudrate, and refresh button are locked until `Disconnect`.
+
+The terminal renders common ANSI SGR color sequences, including standard colors, bright colors, 256-color mode, RGB foreground/background colors, bold, dim, underline, and inverse. Other ANSI cursor/control sequences are ignored instead of being printed as raw escape text.
+
+To write RU manager settings, connect to the UART shell, click `Load JSON`, choose a local JSON file, then click `Apply settings`. The page converts the top-level JSON object to `key=value` lines and overwrites `/etc/rumanager.conf` on the connected Linux system. The shell must be root, or have passwordless `sudo cp` permission for `/etc/rumanager.conf`.
 
 The default bind address is `0.0.0.0:9001`, so other devices on the LAN can open the page by IP:
 
